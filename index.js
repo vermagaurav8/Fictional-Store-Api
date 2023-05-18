@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const {MongoClient, ObjectId} = require('mongodb'); 
+const {validationResult} = require('express-validator')
 const jwt = require('jsonwebtoken');
 const bcrypt =  require('bcrypt');
 const cors = require('cors');
@@ -48,12 +49,12 @@ const validate = (req, res, next) => {
 };
 
 
-//      ROUTES
+//  register route
 app.post('/users/register', async (req, res) => {
     try{
         const { username, password } =  req.body;
         const userCollection = database.collection('users');
-        console.log(database);
+
         // Handling duplicate username
         const existingUser = await userCollection.findOne({ username });
         if(existingUser) 
@@ -78,8 +79,147 @@ app.post('/users/register', async (req, res) => {
     }
 })
 
+// Login Route
+app.post('/users/login', async (req, res) => {
+    try {
+        const {username, password} = req.body;
+        const userCollection = database.collection('users');
 
+        const user = await userCollection.findOne({ username });
+        if(!user)
+            return res.status(401).json({ message: 'Invalid username or password' });
+        
+        const comparePassword = await bcrypt.compare(password, user.password);
+        if (!comparePassword) 
+            return res.status(401).json({ message: 'Invalid username or password -2' });
 
+        const token = jwt.sign({ id: user._id}, jwtSecret, { expiresIn: jwtExpire});
+        res.json({ message: token});
+    }catch (error) {
+        console.error('Error logging in:', error);
+        res.status(500).json({ message: 'Error logging in' }); 
+    }
+})
+
+// Adding a product
+app.post('/products', async (req, res) => {
+    try {
+        const errors = validationResult(req);
+        if(!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        const { name, description, category, price } = req.body;
+        const productsCollection = database.collection('products');
+
+        // duplicate product handling
+        const existingProduct = await productsCollection.findOne({ name });
+        if(existingProduct)
+            return res.status(409).json({ message: 'Product already exists'});
+        
+        const product = {
+            name, 
+            description,
+            category,
+            price: parseFloat(price)
+        }
+
+        const result = await productsCollection.insertOne(product);
+        if(result.insertedCount === 0)
+            return res.status(500).json({ message: 'Error creating product'});
+        
+        res.json({message: 'product created successfully'});
+    } catch(error) {
+        console.error('Error creating product:', error);
+        res.status(500).json({ message: 'Error creating product' });
+    }
+})
+
+// Getting All products with pagenation
+app.get('/products/', async (req, res) => {
+    try {
+        const page = parseInt(req.query.page) || 1; 
+        const limit = parseInt(req.query.limit) || 10; 
+        const skip = (page - 1) * limit;
+
+        const productsCollection = database.collection('products');
+
+        const totalProducts = await productsCollection.countDocuments();
+
+        const products = await productsCollection
+            .find()
+            .skip(skip)
+            .limit(limit)
+            .toArray();
+
+        res.json({ products, totalProducts });
+    } catch (error) {
+        console.error('Error reading products:', error);
+        res.status(500).json({ message: 'Error reading products' });
+    }
+});
+
+// Updating a product
+app.put('/products/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, description, category, price } = req.body;
+        const productsCollection = database.collection('products');
+
+        // Already existing product handling
+        const existingProduct = await productsCollection.findOne({ _id: new ObjectId(id) });
+        if (!existingProduct) {
+            return res.status(404).json({ message: 'Product not found' });
+        }
+
+        //  Same name conflict handling
+        const duplicateProduct = await productsCollection.findOne({ name, _id: { $ne: new ObjectId(id) } });
+        if (duplicateProduct) {
+            return res.status(409).json({ message: 'Product name already exists' });
+        }
+
+        const updatedProduct = {
+            name,
+            description,
+            category,
+            price: parseFloat(price)
+        };
+
+        const result = await productsCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: updatedProduct }
+        );
+
+        if (result.modifiedCount === 0) {
+            return res.status(500).json({ message: 'Error updating product -1' });
+        }
+
+        res.json({ message: 'Product updated successfully', id });
+    } catch (error) {
+        console.error('Error updating product:', error);
+        res.status(500).json({ message: 'Error updating product' });
+    }
+}
+);
+
+// Deleting a product
+app.delete('/products/:id', async (req, res) => {
+    try {
+        const productId = req.params.id;
+        const productsCollection = database.collection('products');
+
+        const result = await productsCollection.deleteOne({ _id: new ObjectId(productId) });
+
+        if (result.deletedCount === 0) {
+            return res.status(404).json({ message: 'Product not found' });
+        }
+
+        res.json({ message: 'Product deleted successfully', productId });
+    } catch (error) {
+        console.error('Error deleteing product:', error);
+        res.status(500).json({ message: 'Error deleting product' });
+    }
+});
 
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
