@@ -32,22 +32,6 @@ async function dbConnect() {
 }
 dbConnect();
 
-// Validate JWT
-const validate = (req, res, next) => {
-    const token = req.header('Authorization')?.split(' ')[1];
-    if(!token) {
-        return res.status(401).json({ message: 'Unauthorized'});
-    }
-
-    try{
-        const decoded = jwt.verify(token, jwtSecret);
-        req.user = decoded;
-        next();
-    } catch(error) {
-        return res.status(403).json({ message: 'Inavalid Token' });
-    }
-};
-
 
 //  register route
 app.post('/users/register', async (req, res) => {
@@ -220,6 +204,47 @@ app.delete('/products/:id', async (req, res) => {
         res.status(500).json({ message: 'Error deleting product' });
     }
 });
+
+// Searching products by name, description, and category
+app.get('/products/search', async (req, res) => {
+    try {
+        const searchQuery = req.query.q || ''; // Get the search query from the query parameter
+        const productsCollection = database.collection('products');
+
+        // Create a search query using case-insensitive regex
+        const query = {
+            $or: [
+                { name: { $regex: searchQuery, $options: 'i' } },
+                { description: { $regex: searchQuery, $options: 'i' } },
+                { category: { $regex: searchQuery, $options: 'i' } }
+            ]
+        };
+
+        const products = await productsCollection.find(query).toArray();
+
+        res.json({ products });
+    } catch (error) {
+        console.error('Error searching products:', error);
+        res.status(500).json({ message: 'Error searching products' });
+    }
+});
+
+// Validate JWT
+const validate = (req, res, next) => {
+    const token = req.header('Authorization')?.split(' ')[1];
+    if(!token) {
+        return res.status(401).json({ message: 'Unauthorized'});
+    }
+
+    try{
+        const decoded = jwt.verify(token, jwtSecret);
+        req.user = decoded;
+        next();
+    } catch(error) {
+        return res.status(403).json({ message: 'Inavalid Token' });
+    }
+};
+
 
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
