@@ -278,6 +278,38 @@ app.post('/cart', validate, async (req, res) => {
     }
 });
 
+// Remove a product from a cart
+// User must be logged in for this
+app.delete('/cart/:productId', validate, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const productId = req.params.productId;
+        const usersCollection = database.collection('users');
+
+        // Check if the user exists
+        const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Remove the product from the user's cart
+        const updatedUser = await usersCollection.findOneAndUpdate(
+            { _id: new ObjectId(userId) },
+            { $pull: { cart: { productId: new ObjectId(productId) } } },
+            { returnOriginal: false }
+        );
+
+        if (!updatedUser.value) {
+            return res.status(500).json({ message: 'Error removing product from cart' });
+        }
+
+        res.json({ message: 'Product removed from cart successfully' });
+    } catch (error) {
+        console.error('Error removing product from cart:', error);
+        res.status(500).json({ message: 'Error removing product from cart' });
+    }
+});
+
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
 });
