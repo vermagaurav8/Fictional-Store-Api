@@ -310,6 +310,8 @@ app.delete('/cart/:productId', validate, async (req, res) => {
     }
 });
 
+
+
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
 });
