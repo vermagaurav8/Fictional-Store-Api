@@ -15,6 +15,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+/*   SECTION:1     CONNECTING TO DB     */
 //connecting mongoDB 
 const dbUri =  process.env.MONGODB_URI;
 const dbName = process.env.DB_NAME;
@@ -32,7 +33,7 @@ async function dbConnect() {
 }
 dbConnect();
 
-
+/*   SECTION:2    REGISTER & LOGIN USING JWT     */
 //  register route
 app.post('/users/register', async (req, res) => {
     try{
@@ -85,6 +86,8 @@ app.post('/users/login', async (req, res) => {
     }
 })
 
+
+/*   SECTION:3    SEARCHING, UPDATING, DELETING PRODUCTS FUNCTIONALITY       */
 // Adding a product
 app.post('/products', async (req, res) => {
     try {
@@ -229,9 +232,13 @@ app.get('/products/search', async (req, res) => {
     }
 });
 
+
+
+/* SECTION 4:    ADDING ITEMS IN CART AND PLACING ORDER FUNCTIONALITY       */
 // Validate JWT
 const validate = (req, res, next) => {
     const token = req.header('Authorization')?.split(' ')[1];
+
     if(!token) {
         return res.status(401).json({ message: 'Unauthorized'});
     }
@@ -245,6 +252,31 @@ const validate = (req, res, next) => {
     }
 };
 
+// Adding products to the shopping cart
+// Only loggedIn user can do this.
+app.post('/cart', validate, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const productId = req.body.productId;
+        const quantity = req.body.quantity || 1; 
+
+        const usersCollection = database.collection('users');
+        // Finding User & Updating cart
+        const result = await usersCollection.updateOne(
+            { _id: new ObjectId(userId) },
+            { $addToSet: { cart: { productId: new ObjectId(productId), quantity: quantity } } }
+        );
+
+        if (result.modifiedCount === 0) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.json({ message: 'Product added to cart successfully' });
+    } catch (error) {
+        console.error('Error adding product to cart:', error);
+        res.status(500).json({ message: 'Error adding product to cart' });
+    }
+});
 
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
