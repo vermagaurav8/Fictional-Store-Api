@@ -5,6 +5,7 @@ const {validationResult} = require('express-validator')
 const jwt = require('jsonwebtoken');
 const bcrypt =  require('bcrypt');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -14,6 +15,13 @@ const jwtExpire = process.env.JWT_EXPIRES_IN;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Rate limiter (limits to 100 request over one IP)
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, 
+    max: 100 
+});
+app.use(limiter);
 
 /*   SECTION:1     CONNECTING TO DB     */
 //connecting mongoDB 
@@ -234,7 +242,8 @@ app.get('/products/search', async (req, res) => {
 
 
 
-/* SECTION 4:    ADDING ITEMS IN CART AND PLACING ORDER FUNCTIONALITY       */
+/* SECTION 4:    ADDING ITEMS IN CART AND PLACING ORDER FUNCTIONALITY   
+                 ONLY VALID USERS CAN DO THESE OPERATIONS                   */
 // Validate JWT
 const validate = (req, res, next) => {
     const token = req.header('Authorization')?.split(' ')[1];
@@ -253,7 +262,6 @@ const validate = (req, res, next) => {
 };
 
 // Adding products to the shopping cart
-// Only loggedIn user can do this.
 app.post('/cart', validate, async (req, res) => {
     try {
         const userId = req.user.id;
@@ -279,7 +287,6 @@ app.post('/cart', validate, async (req, res) => {
 });
 
 // Remove a product from a cart
-// User must be logged in for this
 app.delete('/cart/:productId', validate, async (req, res) => {
     try {
         const userId = req.user.id;
@@ -310,6 +317,83 @@ app.delete('/cart/:productId', validate, async (req, res) => {
     }
 });
 
+// Place an order
+app.post('/orders', validate, async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        const usersCollection = database.collection('users');
+        const ordersCollection = database.collection('orders');
+
+        // Find the user and retrieve their cart
+        const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Empty cart handling
+        const cart = user.cart;
+        if(cart.length == 0) {
+            return res.status(404).json({ message: 'Cart is Empty, Please first add products in cart' });
+        }
+
+        // Create an order document with the user's cart
+        const order = {
+            userId: new ObjectId(userId),
+            products: cart,
+            createdAt: new Date()
+        };
+
+        // Insert the order document
+        const result = await ordersCollection.insertOne(order);
+
+        if (result.insertedCount === 0) {
+            return res.status(500).json({ message: 'Error placing order' });
+        }
+
+        // Clear the user's cart after placing the order
+        await usersCollection.updateOne({ _id: new ObjectId(userId) }, { $set: { cart: [] } });
+
+        res.json({ message: 'Order placed successfully', orderId: result.insertedId });
+    } catch (error) {
+        console.error('Error placing order:', error);
+        res.status(500).json({ message: 'Error placing order' });
+    }
+});
+
+// Retrieve all orders with pagenation
+app.get('/orders', validate, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const page = parseInt(req.query.page) || 1; 
+        const limit = parseInt(req.query.limit) || 10; 
+        const skip = (page - 1) * limit;
+
+        const usersCollection = database.collection('users');
+        const ordersCollection = database.collection('orders');
+
+        // Check if the user exists
+        const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Retrieve total count of orders for the user
+        const totalOrders = await ordersCollection.countDocuments({ userId: new ObjectId(userId) });
+
+        // Retrieve the paginated list of orders for the user
+        const orders = await ordersCollection
+            .find({ userId: new ObjectId(userId) })
+            .skip(skip)
+            .limit(limit)
+            .toArray();
+
+        res.json({ orders, totalOrders });
+    } catch (error) {
+        console.error('Error retrieving orders:', error);
+        res.status(500).json({ message: 'Error retrieving orders' });
+    }
+});
 
 
 app.listen(port, () => {
